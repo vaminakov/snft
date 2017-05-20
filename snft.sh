@@ -160,11 +160,13 @@ fi
 shift
 done
 nft insert rule inet filter input drop
+nft insert rule inet filter input iifname lo accept
+nft insert rule inet filter input ct state {established, related} accept
 for ip in $(pinky | grep -E -o "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}(:[0-9]{1,5})?" | uniq)
 do
 nft insert rule inet filter input ip saddr $ip accept
 done
-echo "Готово. В настоящий момент заблокированы все соединения, кроме вашего."
+echo "Готово. В настоящий момент заблокированы соединения со всех IP, кроме вашего."
 }
 nft_ddos() {
 while (( ${#} ))
