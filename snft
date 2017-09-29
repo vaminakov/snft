@@ -1,0 +1,394 @@
+#!/bin/bash
+if [ "$(id -u)" != "0" ]
+then
+echo "Running is possible only with root privileges!"
+exit 1
+fi
+if [[ -z $(nft list ruleset | grep -E "snft_ban|snft_ddosblock") ]]
+then
+echo "No snft rules found! Configuring the firewall ..."
+nft add set inet filter snft_ban \{ type ipv4_addr\; \}
+nft insert rule inet filter input ip saddr @snft_ban drop
+nft add set inet filter snft_ddosblock \{ type ipv4_addr\; timeout 1h\; \}
+nft insert rule inet filter input ip saddr @snft_ddosblock drop
+if [[ "$?" = 0 ]]
+then
+echo "Success!"
+else
+echo "Error!"
+exit 1
+fi
+fi
+nft_list() {
+i=1
+for ip in $(nft list set inet filter snft_ban | grep -E -o '(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}')
+do
+if [[ "$i" = 1 ]]
+then
+echo "List of blocked IP-addresses:"
+fi
+echo $i: $ip
+let i=i+1
+done
+if [[ -z "$ip" ]]
+then
+echo "No blocked IP addresses."
+fi
+}
+nft_block() {
+if [[ -z $2 ]]
+then
+read -e -p "Enter a space-separated list of IP-addresses to block: " iplist
+shift $#
+else
+while [[ ! ${1} =~ (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3} ]] && [[ -n "$1" ]]
+do
+shift
+done
+fi
+for ip in $iplist ${@}
+do
+if [[ -n "$ip" ]] && [[ $ip =~ (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3} ]] && [[ $ip != $(nft list set inet filter snft_ban | grep -o $ip) ]]
+then
+nft add element inet filter snft_ban \{ $ip \}
+if [[ "$?" = 0 ]]
+then
+echo "IP-address $ip blocked."
+else
+echo "An internal error occured while blocking the IP address of $ip. Most likely, the user has insufficient rights."
+break
+fi
+elif [[ -n "$ip" ]] && [[ ! $ip =~ (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3} ]]
+then
+echo "Error! $ip is not a valid IP-address."
+elif [[ -n "$ip" ]] && [[ $ip =~ (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3} ]] && [[ $ip = $(nft list set inet filter snft_ban | grep -o $ip) ]]
+then
+echo "IP-address $ip is already blocked."
+fi
+done
+if [[ -z "$ip" ]]
+then
+echo "You have not entered an IP address. Try again."
+fi
+}
+nft_unblock() {
+if [[ -z $2 ]]
+then
+read -e -p "Enter a space-separated list of IP-addresses to unblock: " iplist
+shift $#
+else
+while [[ ! ${1} =~ (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3} ]] && [[ -n "$1" ]]
+do
+shift
+done
+fi
+for ip in $iplist ${@}
+do
+if [[ -n "$ip" ]] && [[ $ip =~ (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3} ]] && [[ $ip = $(nft list set inet filter snft_ban | grep -o $ip) ]]
+then
+nft delete element inet filter snft_ban \{ $ip \}
+if [[ "$?" = 0 ]]
+then
+echo "IP-address $ip unblocked."
+else
+echo "An internal error occured while unblocking the IP address of $ip. Most likely, the user has insufficient rights."
+break
+fi
+elif [[ -n "$ip" ]] && [[ ! $ip =~ (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3} ]]
+then
+echo "Error! $ip is not a valid IP-address."
+elif [[ -n "$ip" ]] && [[ $ip =~ (25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3} ]] && [[ $ip != $(nft list set inet filter snft_ban | grep -o $ip) ]]
+then
+echo "IP-address $ip is not blocked."
+fi
+done
+if [[ -z "$ip" ]]
+then
+echo "You have not entered an IP address. Try again."
+fi
+}
+nft_resetrules() {
+while (( ${#} ))
+do
+if [[ "${1}" == "-f" || "${1}" == "--force" ]]
+then
+force=1
+elif [[ "${1}" == "-b" || "${1}" == "--block" ]]
+then
+rule=snft_ban
+elif [[ "${1}" == "-ba" || "${1}" == "--block-all" ]]
+then
+rule=snft_blockall
+elif [[ "${1}" == "-d" || "${1}" == "--ddos" ]]
+then
+rule=snft_ddosblock
+elif [[ "${1}" == "-a" || "${1}" == "--all" ]]
+then
+rule=snft_all
+fi
+shift
+done
+if [[ -z "$rule" ]]
+then
+read -e -p "Select the type of rules to delete:
+b  - delete rules with manually blocked IP addresses,
+ba - remove the blockall rule,
+d  - delete the rules created by the ddos parameter,
+Your choice: " rule
+case "$rule" in
+    b)  
+        rule=snft_ban
+        ;;
+    ba)  
+        rule=snft_blockall
+        ;;
+    d)  
+        rule=snft_ddosblock
+        ;;
+    *)
+        echo "The type of rule being deleted is not selected, nothing has been deleted!"
+        exit 1
+        ;;
+esac
+fi
+if  [[ -z "$force" ]]
+then
+read -e -p "Are you sure?
+y     - yes,
+enter - exit,
+Your choice: " item
+case "$item" in
+    y)  
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+fi
+if [[ "$rule" = "snft_ban" ]]
+then
+nft flush set inet filter snft_ban
+elif [[ "$rule" = "snft_ddosblock" ]]
+then
+nft flush set inet filter snft_ddosblock
+elif [[ "$rule" = "snft_blockall" ]]
+then
+for handle in $(nft list ruleset -a | grep -E "comment \"snft_blockall\"" | grep -o 'handle.*' | sed 's/handle //')
+do
+nft delete rule inet filter input handle $handle
+if [[ "$?" = 0 ]]
+then
+echo "Rule №$handle deleted."
+else
+echo "An internal error occurred while deleting the rule $handle, most likely, the user does not have sufficient rights."
+break
+fi
+done
+if [[ -z "$handle" ]]
+then
+echo "There are no rules, created with snft."
+fi
+fi
+}
+nft_blockall() {
+while (( ${#} ))
+do
+if [[ "${1}" == "-f" || "${1}" == "--force" ]]
+then
+force=1
+fi
+shift
+done
+if  [[ -z "$force" ]]
+then
+read -e -p "Are you sure?
+y     - yes,
+enter - exit,
+Your choice: " item
+case "$item" in
+    y)  
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+fi
+nft insert rule inet filter input drop comment "snft_blockall"
+nft insert rule inet filter input iifname lo accept comment "snft_blockall"
+nft insert rule inet filter input ct state {established, related} accept comment "snft_blockall"
+for ip in $(pinky | grep -E -o "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}(:[0-9]{1,5})?" | sort | uniq)
+do
+nft insert rule inet filter input ip saddr $ip accept comment "snft_blockall"
+done
+echo "Done. Currently, connections from all IPs are blocked, except yours."
+}
+nft_ddos() {
+while (( ${#} ))
+do
+if [[ "${1}" = "-f" || "${1}" = "--force" ]]
+then
+force=1
+elif [[ "${1}" =~ ^[1-9][0-9]*$ ]]
+then
+max=${1}
+fi
+shift
+done
+if [[ -z "$max" ]]
+then
+while [[ -z "$max" ]]
+do
+read -e -p "Enter the connection threshold with an IP address, exceeding which IP address is considered to be an attacker: " -i "30" max
+if [[ ! "$max" =~ ^[1-9][0-9]*$ ]]
+then
+unset max
+echo "Error! You did not enter or entered the wrong connection threshold. Valid values are: [2-∞]"
+fi
+done
+fi
+for ip in $(netstat -ntu | awk '{print $5}' | cut -d: -f1 | sort | uniq -c | sort -rn | grep -E -o "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}")
+do
+count=$(netstat -ntu | awk '{print $5}' | grep "$ip" | wc -l)
+if [[ "$count" -ge "$max" && "$ip" != "127.0.0.1" && "$ip" != "8.8.8.8" && "$ip" != "8.8.4.4" ]]
+then
+if [[ -z "$force" ]]
+then
+if [[ -z "$attack" ]]
+then
+attack=0
+fi
+read -e -p "$count connection(s) with $ip. Block this IP?
+y     - yes,
+enter - skip,
+Your choice: " item
+case "$item" in
+    y)  
+        ;;
+    *)  continue
+        ;;
+esac
+#else
+# An additional script for sending messages when an attack is detected in the automatic (force) mode.
+#if [ -f "/etc/sh/telegram.sh" ]
+#then
+#sh /etc/sh/telegram.sh "An attack on $(uname -n) was detected. Blocked IP $ip."
+#fi
+fi
+let attack=attack+1
+nft add element inet filter snft_ddosblock \{ $ip \}
+if [[ "$?" = 0 ]]
+then
+echo "IP-address $ip blocked."
+else
+echo "An internal error occured while blocking the IP address of $ip. Most likely, the user has insufficient rights."
+fi
+fi
+done
+if [[ -z "$attack" ]]
+then
+echo "There are no IP addresses with more than $max connections."
+else
+echo "The work is completed, blocked IPs: $attack."
+fi
+}
+nft_help() {
+echo "Usage: snft [command] [parameters]
+Available commands:
+    -b,  --block          block IP-address,
+         [IP-адрес1] [IP-адрес2] ...
+    -u,  --unblock        unblock IP-address,
+         [IP-адрес1] [IP-адрес2] ...
+    -ba, --block-all      block all connections except the current IP,
+         -f, --force      do not request confirmation for actions,
+    -d,  --ddos           find and block connections to IP addresses with which the specified number of connections is exceeded,
+         -f, --force      do not request confirmation for actions,
+         [2-∞]            the connection threshold with an IP address, exceeding which IP address is considered to be an attacker,
+    -l,  --list           list of blocked IP-addresses,
+    -rr, --reset-rules    reset snft rules,
+         -f, --force      do not request confirmation for actions,
+         -b, --block      delete rules with manually blocked IP-addresses,
+         -ba, --block-all delete blockall rule,
+         -d,  --ddos      delete rules created by the ddos parameter,
+    -h,  --help           show help and exit.
+    -v,  --version        show version information.
+"
+}
+nft_version() {
+echo "snft by VVL
+version 1.1.0     29 september 2017"
+}
+nft_menu() {
+echo "The nft control menu. Select an action:
+b  - block the IP address,
+u  - unlock the IP address,
+ba - block all connections except the current IP,
+d  - find and block connections to IP addresses with which the specified number of connections is exceeded,
+l  - list of blocked IP-addresses,
+rr - reset snft rules,
+q  - exit. "
+read -e -p "Your choise: " menu
+case "$menu" in
+    b)
+nft_block
+;;
+    u)
+nft_unblock
+;;
+    l)
+nft_list
+;;
+    rr)
+nft_resetrules
+;;
+    ba)
+nft_blockall
+;;
+    d)
+nft_ddos
+;;
+    q)
+exit 0
+;;
+    *)
+nft_menu
+;;
+esac
+}
+nft_param() {
+case "${1}" in
+    -b|--block)
+nft_block ${@}
+;;
+    -u|--unblock)
+nft_unblock ${@}
+;;
+    -l|--list)
+nft_list
+;;
+    -rr|--reset-rules)
+nft_resetrules ${@}
+;;
+    -ba|--block-all)
+nft_blockall ${@}
+;;
+    -d|--ddos)
+nft_ddos ${@}
+;;
+    -h|--help)
+nft_help
+;;
+    -v|--version)
+nft_version
+;;
+    *)
+echo "Error, the parameter is incorrect!"
+nft_help
+;;
+esac
+}
+if [[ -z "${@}" ]]
+then
+nft_menu
+else
+nft_param ${@}
+fi
