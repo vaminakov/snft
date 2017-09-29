@@ -1,5 +1,13 @@
 # Script for simple configuring firewall based on nftables.
 ***
+### Description: 
+This is a written on bash script, which provides you to fast and simple manipulate with nftables firewall. **Requires `nftables` to be installed.**
+
+Current features:
+* Block/unblock ipv4 addresses by simple command
+* Find and block ipv4 addresses which attack using DDoS
+* Block all tcp connections except your ssh IP-address (suitable for fast remote command on DDoS attacks)
+* Force/interactive modes; all actions are reversible
 ### Usage: 
 ```
 snft [command] [parameters]
