@@ -1,0 +1,10 @@
+#This file contains changelog of snft script
+
+# 1.1.0 - 2017-09-29
++ fully translated to English
++ changed IP blocking method to use nftables sets
++ added versioning information
+- bug fixing, improved speed
+
+# 1.0.0 - 2017-07-01
+- Initial release
