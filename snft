@@ -1,8 +1,8 @@
 #!/bin/bash
-if [ "$(id -u)" != "0" ]
+if [[ $EUID -ne 0 ]]
 then
-echo "Running is possible only with root privileges!"
-exit 1
+sudo $0 "${*}" || su -c $0 "${*}" || exit 1
+exit 0
 fi
 if [[ -z $(nft list ruleset | grep -E "snft_ban|snft_ddosblock") ]]
 then
@@ -295,9 +295,9 @@ nft_help() {
 echo "Usage: snft [command] [parameters]
 Available commands:
     -b,  --block          block IP-address,
-         [IP-адрес1] [IP-адрес2] ...
+         [IP-address1] [IP-address2] ...
     -u,  --unblock        unblock IP-address,
-         [IP-адрес1] [IP-адрес2] ...
+         [IP-address1] [IP-address2] ...
     -ba, --block-all      block all connections except the current IP,
          -f, --force      do not request confirmation for actions,
     -d,  --ddos           find and block connections to IP addresses with which the specified number of connections is exceeded,
